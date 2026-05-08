@@ -15,11 +15,12 @@ typedef enum {
     PID_VELOCITY,   // 对应 velocity_pid
     PID_SITE0,
     PID_VELOCITY1,
+    PID_SITE1,
     PID_MAX_COUNT   // 统计总数
 } PIDName;
 
 // 函数声明
-float velocityOpenloop(float target_v);
+// float velocityOpenloop(float target_v);
 extern float openloop_voltage;
 extern PIDController pid[PID_MAX_COUNT];
 float PID_Controller(float error, PIDController *pid);

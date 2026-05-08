@@ -15,8 +15,13 @@
 #define MOT0_A_ADC_CHANNEL     ADC_CHANNEL_3   // GPIO39
 #define MOT0_B_ADC_CHANNEL     ADC_CHANNEL_0   // GPIO36
 
+// 电机1相电流ADC通道
+#define MOT1_A_ADC_CHANNEL     ADC_CHANNEL_6   // GPIO34
+#define MOT1_B_ADC_CHANNEL     ADC_CHANNEL_7   // GPIO35
+
 // 电流结构体
 typedef struct {
+    char motor;        // 电机编号（0或1）
     float current_a;   // A相电流
     float current_b;   // B相电流
     float current_c;   // C相电流
@@ -26,6 +31,6 @@ typedef struct {
 void curr_sense_init(void);
 
 // 获取相电流
-void curr_sense_get_currents(curr_sense_t *cs);
+void curr_sense_get_currents(char motor, curr_sense_t *cs);
 
 #endif
