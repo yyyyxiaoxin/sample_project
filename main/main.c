@@ -30,7 +30,7 @@ curr_sense_t cs_m1;
 
 static float M0_sensor_dir = -1.0f;
 static float M1_sensor_dir = 1.0f;
-static float M0_torque_dir = 1.0f;
+static float M0_torque_dir = -1.0f;
 static float M1_torque_dir = 1.0f;
 static float M0_foc_phase_offset = PI * 0.5f;
 static float M1_foc_phase_offset = PI * 0.5f;
@@ -56,14 +56,14 @@ static float angle_diff(float a, float b)
 
 static float target_velocity = TARGET_VELOCITY;
 static float target_angle = TARGET_ANGLE;
-static float M0_target_speed = 2.0f;
+static float M0_target_speed = 0.8f;
 static float M1_target_speed = 3.0f;
 static float M0_target_angle = 0.0f;
 static float M1_target_angle = 0.0f;
 static float M1_target_vel_ff = 0.0f;
 static bool M1_sweep_enable = true;
-static float M1_sweep_speed = 8.0f;
-static float M1_sweep_amplitude = 45.0f * PI / 180.0f;
+static float M1_sweep_speed = 0.2f;
+static float M1_sweep_amplitude = 5.0f * PI / 180.0f;
 static float M1_sweep_center = 2.0f;
 static float M1_sweep_center_offset = 0.0f;
 static float M1_sweep_phase = 0.0f;
@@ -492,6 +492,7 @@ void site_closeloop_task(void *arg)
 {
     static float M0_Uq = 0.0f;
     static float M0_vel_integral = 0.0f;
+    static float M0_last_target_speed = 0.0f;
     static float M1_Uq = 0.0f;
     int settle_count = 0;
     while(1)
@@ -499,6 +500,7 @@ void site_closeloop_task(void *arg)
         if (settle_count < 50) {
             M0_Uq = 0.0f;
             M0_vel_integral = 0.0f;
+            M0_last_target_speed = M0_target_speed;
             M1_Uq = 0.0f;
             M0_filter_vel = 0.0f;
             M1_filter_vel = 0.0f;
@@ -518,12 +520,23 @@ void site_closeloop_task(void *arg)
         }
 
         float M0_speed = M0_filter_vel;
+        if (fabsf(M0_target_speed - M0_last_target_speed) > 0.05f) {
+            M0_vel_integral = 0.0f;
+            M0_Uq = 0.0f;
+            M0_last_target_speed = M0_target_speed;
+        }
+
         float M0_vel_error = M0_target_speed - M0_speed;
         M0_vel_integral += M0_vel_error * 0.01f;
-        M0_vel_integral = constrain(M0_vel_integral, -1.2f, 1.2f);
-        float M0_Uq_target = 0.22f * M0_vel_error + 0.12f * M0_vel_integral;
+        M0_vel_integral = constrain(M0_vel_integral, -2.2f, 2.2f);
+        float M0_vel_ff = 0.0f;
+        if (fabsf(M0_target_speed) > 0.2f) {
+            M0_vel_ff = (M0_target_speed > 0.0f) ? 0.80f : -0.80f;
+        }
+        float M0_Uq_target = M0_vel_ff + 0.42f * M0_vel_error + 0.18f * M0_vel_integral;
         if (fabsf(M0_target_speed) > 0.2f && fabsf(M0_speed) < fabsf(M0_target_speed) * 0.8f) {
-            M0_Uq_target += (M0_target_speed > 0.0f) ? 0.75f : -0.75f;
+            float M0_boost = constrain(0.40f * fabsf(M0_target_speed), 0.60f, 1.25f);
+            M0_Uq_target += (M0_target_speed > 0.0f) ? M0_boost : -M0_boost;
         }
 
         if (M0_encoder_fail_count > 20) {
@@ -532,8 +545,8 @@ void site_closeloop_task(void *arg)
             M0_vel_integral = 0.0f;
         }
 
-        M0_Uq_target = constrain(M0_Uq_target, -2.0f, 2.0f);
-        M0_Uq += constrain(M0_Uq_target - M0_Uq, -0.04f, 0.04f);
+        M0_Uq_target = constrain(M0_Uq_target, -5.0f, 5.0f);
+        M0_Uq += constrain(M0_Uq_target - M0_Uq, -0.10f, 0.10f);
         setPhaseVoltage(0, M0_torque_dir * M0_Uq, 0, normalizeAngle(M0_electricalAngle + M0_foc_phase_offset));
 
         if (M1_sweep_enable) {
@@ -569,8 +582,10 @@ void site_closeloop_task(void *arg)
         float M1_speed = M1_sensor_dir * M1_filter_vel;
         float M1_Uq_target = 0.0f;
         if (M1_sweep_enable) {
-            float ff_ratio = constrain(M1_target_vel_ff / M1_sweep_speed, -1.0f, 1.0f);
-            M1_Uq_target = 1.45f * ff_ratio + 0.55f * M1_pos_error - 0.05f * M1_speed;
+            M1_Uq_target = 0.45f * M1_target_vel_ff + 0.70f * M1_pos_error - 0.08f * M1_speed;
+            if (fabsf(M1_pos_error) > 0.025f || fabsf(M1_target_vel_ff) > 0.05f) {
+                M1_Uq_target += (M1_target_vel_ff >= 0.0f) ? 0.45f : -0.45f;
+            }
         } else {
             float M1_vel_target = constrain(1.5f * M1_pos_error, -M1_position_limit, M1_position_limit);
             float M1_vel_error = M1_vel_target - M1_speed;
@@ -589,8 +604,13 @@ void site_closeloop_task(void *arg)
             M1_Uq = 0.0f;
         }
 
-        M1_Uq_target = constrain(M1_Uq_target, -4.0f, 4.0f);
-        M1_Uq += constrain(M1_Uq_target - M1_Uq, -0.07f, 0.07f);
+        if (M1_sweep_enable) {
+            M1_Uq_target = constrain(M1_Uq_target, -1.8f, 1.8f);
+            M1_Uq += constrain(M1_Uq_target - M1_Uq, -0.035f, 0.035f);
+        } else {
+            M1_Uq_target = constrain(M1_Uq_target, -4.0f, 4.0f);
+            M1_Uq += constrain(M1_Uq_target - M1_Uq, -0.07f, 0.07f);
+        }
         setPhaseVoltage(1, M1_torque_dir * M1_Uq, 0, normalizeAngle(M1_electricalAngle + M1_foc_phase_offset));
         vTaskDelay(pdMS_TO_TICKS(10));
     }
